@@ -64,8 +64,17 @@ jobs:
 
           # Restore fork-specific workflow files (avoid GITHUB_TOKEN restriction on pushing workflow file changes)
           cp -r /tmp/save-workflows/* .github/workflows/ 2>/dev/null || true
+
+          # Stage everything and check if workflow files actually differ
           git add -A
-          git commit -m "chore: restore fork-specific workflow files" || echo "没有 workflow 变更，无需恢复"
+          if ! git diff --cached --quiet -- '.github/workflows/'; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore: restore fork-specific workflow files"
+            echo "=== workflow 文件已恢复 ==="
+          else
+            echo "=== workflow 文件无变化，无需恢复 ==="
+          fi
 
           # Push — no workflow file diff, so GITHUB_TOKEN is sufficient
           git push --force origin ${{ env.TARGET_SYNC_BRANCH }}
