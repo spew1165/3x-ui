@@ -51,30 +51,38 @@ jobs:
           echo "=== 上游/${{ env.UPSTREAM_SYNC_BRANCH }} 最新提交 ==="
           git log -3 upstream/${{ env.UPSTREAM_SYNC_BRANCH }} --oneline
 
-      - name: Sync upstream changes using git reset
+      - name: Sync upstream changes and push (skip workflow files to avoid permission error)
         run: |
+          # Save current workflow files
+          mkdir -p /tmp/save-workflows
+          cp -r .github/workflows/* /tmp/save-workflows/ 2>/dev/null || true
+
+          # Reset to upstream
           git checkout ${{ env.TARGET_SYNC_BRANCH }}
           git reset --hard upstream/${{ env.UPSTREAM_SYNC_BRANCH }}
           echo "=== 重置完成 ==="
 
-      - name: Push sync branch (using PAT to bypass workflow file restriction)
-        run: |
-          git remote set-url origin "https://x-access-token:${{ secrets.SYNC_TOKEN }}@github.com/${{ github.repository }}.git"
+          # Restore fork-specific workflow files (avoid GITHUB_TOKEN restriction on pushing workflow file changes)
+          cp -r /tmp/save-workflows/* .github/workflows/ 2>/dev/null || true
+          git add -A
+          git commit -m "chore: restore fork-specific workflow files" || echo "没有 workflow 变更，无需恢复"
+
+          # Push — no workflow file diff, so GITHUB_TOKEN is sufficient
           git push --force origin ${{ env.TARGET_SYNC_BRANCH }}
           echo "=== 推送完成 ==="
 
       - name: Verify sync completion
         run: |
-          LOCAL_COMMIT=$(git rev-parse HEAD)
           UPSTREAM_COMMIT=$(git rev-parse upstream/${{ env.UPSTREAM_SYNC_BRANCH }})
-          echo "本地提交:  $LOCAL_COMMIT"
+          echo "当前 HEAD: $(git rev-parse HEAD)"
           echo "上游提交: $UPSTREAM_COMMIT"
-          if [ "$LOCAL_COMMIT" = "$UPSTREAM_COMMIT" ]; then
-            echo "✓ 本地分支已与上游分支同步"
-            echo "=== 验证文件内容 ==="
-            git diff --stat upstream/${{ env.UPSTREAM_SYNC_BRANCH }} HEAD
+          echo "=== 验证同步内容（排除 workflow 文件）==="
+          # Check that all non-workflow files match upstream
+          if git diff --quiet upstream/${{ env.UPSTREAM_SYNC_BRANCH }} HEAD -- ':!.github/workflows'; then
+            echo "✓ 非 workflow 文件已与上游同步"
           else
-            echo "✗ 同步验证失败"
+            echo "✗ 非 workflow 文件与上游存在差异"
+            git diff --stat upstream/${{ env.UPSTREAM_SYNC_BRANCH }} HEAD -- ':!.github/workflows'
             exit 1
           fi
 
@@ -82,9 +90,10 @@ jobs:
         if: failure()
         run: |
           echo "[错误] 同步失败，请检查以下可能的原因："
-          echo "1. 上游仓库的 workflow 文件发生变更"
+          echo "1. 上游仓库不存在或网络不可达"
           echo "2. 分支保护规则阻止了强制推送"
-          echo "请手动 Sync Fork 一次，或检查仓库设置中的分支保护规则。"
+          echo "3. workflow 文件以外的代码文件存在冲突"
+          echo "请手动检查上游仓库状态，或查看 Action 日志获取更多细节。"
           exit 1
 
       - name: Delete old workflow runs
