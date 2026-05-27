@@ -55,8 +55,13 @@ jobs:
         run: |
           git checkout ${{ env.TARGET_SYNC_BRANCH }}
           git reset --hard upstream/${{ env.UPSTREAM_SYNC_BRANCH }}
-          git push --force-with-lease origin ${{ env.TARGET_SYNC_BRANCH }}
           echo "=== 重置完成 ==="
+
+      - name: Push sync branch (using PAT to bypass workflow file restriction)
+        run: |
+          git remote set-url origin "https://x-access-token:${{ secrets.SYNC_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push --force origin ${{ env.TARGET_SYNC_BRANCH }}
+          echo "=== 推送完成 ==="
 
       - name: Verify sync completion
         run: |
